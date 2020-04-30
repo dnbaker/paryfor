@@ -688,13 +688,13 @@ using std::uint64_t;
 using std::uint8_t;
 
 
-template <typename I>
-void parallel_for(const I& begin,
-                  const I& end,
-                  const uint64_t& nthreads,
-                  const std::function<void(I, int)>& func) {
-    auto queue_ptr = new atomic_queue::AtomicQueue2<I, 2 << 16>;
-    auto& queue = *queue_ptr;
+template <typename I, typename Func>
+void parallel_for(const I begin,
+                  const I end,
+                  const uint64_t nthreads,
+                  const Func& func,
+                  std::vector<std::thread> *workersp=nullptr) {
+    atomic_queue::AtomicQueue2<I, 2 << 16> queue;
     std::atomic<bool> work_todo;
     auto worker =
         [&queue,&work_todo,&func](int thread_id) {
@@ -708,10 +708,13 @@ void parallel_for(const I& begin,
             }
         };
     std::vector<std::thread> workers;
-    workers.reserve(nthreads);
+    if(!workersp) workersp = &workers;
+    else workersp->clear();
+    auto &workerr = *workersp;
+    workerr.reserve(nthreads);
     work_todo.store(true);
     for (uint64_t t = 0; t < nthreads; ++t) {
-        workers.emplace_back(worker, t);
+        workerr.emplace_back(worker, t);
     }
     I todo_i = begin;
     while (todo_i != end) {
@@ -725,29 +728,17 @@ void parallel_for(const I& begin,
         std::this_thread::sleep_for(std::chrono::nanoseconds(1));
     }
     work_todo.store(false);
-    for (uint64_t t = 0; t < nthreads; ++t) {
-        workers[t].join();
-    }
-    delete queue_ptr;
+    for(auto &w: workerr) w.join();
 }
 
-// specialization where we don't use the thread id
-template <typename I>
-void parallel_for(const I& begin,
-                  const I& end,
-                  const uint64_t& nthreads,
-                  const std::function<void(I)>& func) {
-    parallel_for<I>(begin, end, nthreads, [&func](I i, int id) { func(i); });
-}
-
-template <typename I>
+template <typename I, typename Func>
 void parallel_for(const I& begin,
                   const I& end,
                   const uint64_t& nthreads,
                   const uint64_t& chunk_size,
-                  const std::function<void(I, int)>& func) {
-    auto queue_ptr = new atomic_queue::AtomicQueue2<std::pair<I, I>, 2 << 16>;
-    auto& queue = *queue_ptr;
+                  const Func& func,
+                  std::vector<std::thread> *workersp=nullptr) {
+    atomic_queue::AtomicQueue2<std::pair<I, I>, 2 << 16> queue;
     std::atomic<bool> work_todo;
     auto worker =
         [&queue,&work_todo,&func](int thread_id) {
@@ -763,10 +754,13 @@ void parallel_for(const I& begin,
             }
         };
     std::vector<std::thread> workers;
-    workers.reserve(nthreads);
+    if(!workersp) workersp = &workers;
+    else workersp->clear();
+    auto &workerr = *workersp;
+    workerr.reserve(nthreads);
     work_todo.store(true);
     for (uint64_t t = 0; t < nthreads; ++t) {
-        workers.emplace_back(worker, t);
+        workerr.emplace_back(worker, t);
     }
     std::pair<I, I> todo_range = std::make_pair(begin, std::min(begin + chunk_size, end));
     I& todo_i = todo_range.first;
@@ -783,20 +777,7 @@ void parallel_for(const I& begin,
         std::this_thread::sleep_for(std::chrono::nanoseconds(1));
     }
     work_todo.store(false);
-    for (uint64_t t = 0; t < nthreads; ++t) {
-        workers[t].join();
-    }
-    delete queue_ptr;
-}
-
-// specialization where we don't use the thread id
-template <typename I>
-void parallel_for(const I& begin,
-                  const I& end,
-                  const uint64_t& nthreads,
-                  const uint64_t& chunk_size,
-                  const std::function<void(I)>& func) {
-    parallel_for<I>(begin, end, nthreads, chunk_size, [&func](I i, int id) { func(i); });
+    for(auto &w: workerr) w.join();
 }
 
 }
